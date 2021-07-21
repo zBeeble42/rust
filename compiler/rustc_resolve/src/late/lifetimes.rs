@@ -2173,7 +2173,7 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
     ) where
         F: for<'b, 'c> FnOnce(&'b mut LifetimeContext<'c, 'tcx>),
     {
-        insert_late_bound_lifetimes(self.map, decl, generics);
+        insert_late_bound_lifetimes(self.tcx, self.map, decl, generics);
 
         // Find the start of nested early scopes, e.g., in methods.
         let mut next_early_index = 0;
@@ -3488,13 +3488,18 @@ impl<'a, 'tcx> LifetimeContext<'a, 'tcx> {
 /// "Constrained" basically means that it appears in any type but
 /// not amongst the inputs to a projection. In other words, `<&'a
 /// T as Trait<''b>>::Foo` does not constrain `'a` or `'b`.
-#[tracing::instrument(level = "debug", skip(map))]
-fn insert_late_bound_lifetimes(
+#[tracing::instrument(level = "debug", skip(tcx, map))]
+fn insert_late_bound_lifetimes<'tcx>(
+    tcx: TyCtxt<'tcx>,
     map: &mut NamedRegionMap,
     decl: &hir::FnDecl<'_>,
     generics: &hir::Generics<'_>,
 ) {
-    let mut constrained_by_input = ConstrainedCollector::default();
+    let mut constrained_by_input = rustc_middle::hir::ConstrainedCollector {
+        tcx,
+        regions: FxHashSet::default(),
+        types: FxHashSet::default(),
+    };
     for arg_ty in decl.inputs {
         constrained_by_input.visit_ty(arg_ty);
     }
@@ -3557,12 +3562,14 @@ fn insert_late_bound_lifetimes(
 
     return;
 
-    #[derive(Default)]
-    struct ConstrainedCollector {
+/*
+    struct ConstrainedCollector<'tcx> {
+        tcx: TyCtxt<'tcx>,
         regions: FxHashSet<hir::LifetimeName>,
+        types: FxHashSet<DefId>,
     }
 
-    impl<'v> Visitor<'v> for ConstrainedCollector {
+    impl<'v, 'tcx> Visitor<'v> for ConstrainedCollector<'tcx> {
         type Map = intravisit::ErasedMap<'v>;
 
         fn nested_visit_map(&mut self) -> NestedVisitorMap<Self::Map> {
@@ -3570,6 +3577,7 @@ fn insert_late_bound_lifetimes(
         }
 
         fn visit_ty(&mut self, ty: &'v hir::Ty<'v>) {
+            debug!(?ty);
             match ty.kind {
                 hir::TyKind::Path(
                     hir::QPath::Resolved(Some(_), _) | hir::QPath::TypeRelative(..),
@@ -3586,7 +3594,25 @@ fn insert_late_bound_lifetimes(
                     // is, those would be potentially inputs to
                     // projections
                     if let Some(last_segment) = path.segments.last() {
-                        self.visit_path_segment(path.span, last_segment);
+                        match path.res {
+                            Res::Def(DefKind::TyAlias, def_id) => {
+                                let constrained = self.tcx.constrained_generics_of_ty_alias(def_id);
+                                if let Some(args) = last_segment.args {
+                                    let args = args.args;
+                                    constrained.into_iter().for_each(|i| {
+                                        let param = &args[i];
+                                        match param {
+                                            hir::GenericArg::Lifetime(lt) => {
+                                                self.regions.insert(lt.name.normalize_to_macros_2_0());
+                                            }
+                                            _ => {}
+                                        }
+                                    });
+                                }
+                            }
+                            Res::Def(DefKind::TyParam, def_id) => self.types.insert(def_id),
+                            _ => self.visit_path_segment(path.span, last_segment),
+                        }
                     }
                 }
 
@@ -3600,7 +3626,7 @@ fn insert_late_bound_lifetimes(
             self.regions.insert(lifetime_ref.name.normalize_to_macros_2_0());
         }
     }
-
+*/
     #[derive(Default)]
     struct AllCollector {
         regions: FxHashSet<hir::LifetimeName>,

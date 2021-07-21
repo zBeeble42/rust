@@ -1,6 +1,8 @@
 use rustc_data_structures::fx::FxIndexSet;
+use rustc_data_structures::stable_set::FxHashSet;
 use rustc_hir as hir;
 use rustc_hir::def_id::{DefId, LocalDefId};
+use rustc_hir::intravisit::Visitor;
 use rustc_middle::hir::map as hir_map;
 use rustc_middle::ty::subst::Subst;
 use rustc_middle::ty::{
@@ -531,6 +533,37 @@ pub fn conservative_is_privately_uninhabited_raw<'tcx>(
     }
 }
 
+pub fn constrained_generics_of_ty_alias<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId) -> Vec<usize> {
+    let node = tcx.hir().get_if_local(def_id).unwrap();
+    match node {
+        hir::Node::Item(hir::Item { kind: hir::ItemKind::TyAlias(ty, generics), .. }) => {
+            let mut collector = rustc_middle::hir::ConstrainedCollector {
+                tcx,
+                regions: FxHashSet::default(),
+                types: FxHashSet::default(),
+            };
+            collector.visit_ty(ty);
+            debug!(?collector.regions, ?generics);
+            let collected_regions: FxHashSet<_> = collector
+                .regions
+                .iter()
+                .filter_map(|r| {
+                    match r {
+                        hir::LifetimeName::Param(hir::ParamName::Plain(found_ident)) => Some(found_ident.name),
+                        _ => None,
+                    }
+                }).collect();
+            generics.params.iter().enumerate().filter_map(|(i, param)| {
+                match param.name {
+                    hir::ParamName::Plain(ident) if collected_regions.contains(&ident.name) => Some(i),
+                    _ => collector.types.contains(&tcx.hir().local_def_id(param.hir_id).to_def_id()).then(|| i),
+                }
+            }).collect()
+        }
+        _ => bug!("{:?}", node),
+    }
+}
+
 pub fn provide(providers: &mut ty::query::Providers) {
     *providers = ty::query::Providers {
         asyncness,
@@ -547,6 +580,7 @@ pub fn provide(providers: &mut ty::query::Providers) {
         impl_defaultness,
         impl_constness,
         conservative_is_privately_uninhabited: conservative_is_privately_uninhabited_raw,
+        constrained_generics_of_ty_alias,
         ..*providers
     };
 }

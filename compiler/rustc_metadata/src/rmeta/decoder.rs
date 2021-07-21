@@ -962,6 +962,13 @@ impl<'a, 'tcx> CrateMetadataRef<'a> {
         self.get_impl_data(id).constness
     }
 
+    fn constrained_generics_of_ty_alias(&self, id: DefIndex) -> Vec<usize> {
+        match self.kind(id) {
+            EntryKind::Type(data) => data.decode(self).constrained_subst_indices,
+            _ => bug!(),
+        }
+    }
+
     fn get_coerce_unsized_info(&self, id: DefIndex) -> Option<ty::adjustment::CoerceUnsizedInfo> {
         self.get_impl_data(id).coerce_unsized_info
     }

@@ -1378,7 +1378,10 @@ impl EncodeContext<'a, 'tcx> {
             }
             hir::ItemKind::ForeignMod { .. } => EntryKind::ForeignMod,
             hir::ItemKind::GlobalAsm(..) => EntryKind::GlobalAsm,
-            hir::ItemKind::TyAlias(..) => EntryKind::Type,
+            hir::ItemKind::TyAlias(..) => {
+                let constrained_subst_indices = self.tcx.constrained_generics_of_ty_alias(def_id);
+                EntryKind::Type(self.lazy(TypeData { constrained_subst_indices }))
+            }
             hir::ItemKind::OpaqueTy(..) => {
                 self.encode_explicit_item_bounds(def_id);
                 EntryKind::OpaqueTy

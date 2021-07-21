@@ -109,6 +109,7 @@ impl<T> LazyMeta for [T] {
 #[must_use]
 // FIXME(#59875) the `Meta` parameter only exists to dodge
 // invariance wrt `T` (coming from the `meta: T::Meta` field).
+#[derive(Debug)]
 struct Lazy<T, Meta = <T as LazyMeta>::Meta>
 where
     T: ?Sized + LazyMeta<Meta = Meta>,
@@ -317,7 +318,7 @@ define_tables! {
     proc_macro_quoted_spans: Table<usize, Lazy<Span>>,
 }
 
-#[derive(Copy, Clone, MetadataEncodable, MetadataDecodable)]
+#[derive(Copy, Clone, Debug, MetadataEncodable, MetadataDecodable)]
 enum EntryKind {
     AnonConst(mir::ConstQualifs, Lazy<RenderedConst>),
     Const(mir::ConstQualifs, Lazy<RenderedConst>),
@@ -328,7 +329,7 @@ enum EntryKind {
     ForeignMod,
     ForeignType,
     GlobalAsm,
-    Type,
+    Type(Lazy<TypeData>),
     TypeParam,
     ConstParam,
     OpaqueTy,
@@ -354,23 +355,23 @@ enum EntryKind {
 
 /// Contains a constant which has been rendered to a String.
 /// Used by rustdoc.
-#[derive(Encodable, Decodable)]
+#[derive(Debug, Encodable, Decodable)]
 struct RenderedConst(String);
 
-#[derive(MetadataEncodable, MetadataDecodable)]
+#[derive(Debug, MetadataEncodable, MetadataDecodable)]
 struct ModData {
     reexports: Lazy<[Export<hir::HirId>]>,
     expansion: ExpnId,
 }
 
-#[derive(MetadataEncodable, MetadataDecodable)]
+#[derive(Debug, MetadataEncodable, MetadataDecodable)]
 struct FnData {
     asyncness: hir::IsAsync,
     constness: hir::Constness,
     param_names: Lazy<[Ident]>,
 }
 
-#[derive(TyEncodable, TyDecodable)]
+#[derive(Debug, TyEncodable, TyDecodable)]
 struct VariantData {
     ctor_kind: CtorKind,
     discr: ty::VariantDiscr,
@@ -379,7 +380,7 @@ struct VariantData {
     is_non_exhaustive: bool,
 }
 
-#[derive(TyEncodable, TyDecodable)]
+#[derive(Debug, TyEncodable, TyDecodable)]
 struct TraitData {
     unsafety: hir::Unsafety,
     paren_sugar: bool,
@@ -389,7 +390,7 @@ struct TraitData {
     specialization_kind: ty::trait_def::TraitSpecializationKind,
 }
 
-#[derive(TyEncodable, TyDecodable)]
+#[derive(Debug, TyEncodable, TyDecodable)]
 struct ImplData {
     polarity: ty::ImplPolarity,
     constness: hir::Constness,
@@ -401,10 +402,15 @@ struct ImplData {
     coerce_unsized_info: Option<ty::adjustment::CoerceUnsizedInfo>,
 }
 
+#[derive(Debug, TyEncodable, TyDecodable)]
+struct TypeData {
+    constrained_subst_indices: Vec<usize>,
+}
+
 /// Describes whether the container of an associated item
 /// is a trait or an impl and whether, in a trait, it has
 /// a default, or an in impl, whether it's marked "default".
-#[derive(Copy, Clone, TyEncodable, TyDecodable)]
+#[derive(Copy, Clone, Debug, TyEncodable, TyDecodable)]
 enum AssocContainer {
     TraitRequired,
     TraitWithDefault,
@@ -436,7 +442,7 @@ impl AssocContainer {
     }
 }
 
-#[derive(MetadataEncodable, MetadataDecodable)]
+#[derive(Debug, MetadataEncodable, MetadataDecodable)]
 struct AssocFnData {
     fn_data: FnData,
     container: AssocContainer,

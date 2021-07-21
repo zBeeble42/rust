@@ -9,12 +9,17 @@ pub mod place;
 use crate::ich::StableHashingContext;
 use crate::ty::query::Providers;
 use crate::ty::TyCtxt;
+use hir::def::{DefKind, Res};
+use hir::def_id::DefId;
+use hir::intravisit::Visitor;
 use rustc_ast::Attribute;
 use rustc_data_structures::fingerprint::Fingerprint;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
+use rustc_data_structures::stable_set::FxHashSet;
 use rustc_hir::def_id::LocalDefId;
 use rustc_hir::*;
+use rustc_hir as hir;
 use rustc_index::vec::{Idx, IndexVec};
 use rustc_span::DUMMY_SP;
 use std::collections::BTreeMap;
@@ -115,6 +120,72 @@ impl<'tcx> AttributeMap<'tcx> {
             local_id: local_zero,
         };
         self.map.range(range)
+    }
+}
+
+pub struct ConstrainedCollector<'tcx> {
+    pub tcx: TyCtxt<'tcx>,
+    pub regions: FxHashSet<hir::LifetimeName>,
+    pub types: FxHashSet<DefId>,
+}
+
+impl<'v, 'tcx> Visitor<'v> for ConstrainedCollector<'tcx> {
+    type Map = intravisit::ErasedMap<'v>;
+
+    fn nested_visit_map(&mut self) -> intravisit::NestedVisitorMap<Self::Map> {
+        intravisit::NestedVisitorMap::None
+    }
+
+    fn visit_ty(&mut self, ty: &'v hir::Ty<'v>) {
+        debug!(?ty);
+        match ty.kind {
+            hir::TyKind::Path(
+                hir::QPath::Resolved(Some(_), _) | hir::QPath::TypeRelative(..),
+            ) => {
+                // ignore lifetimes appearing in associated type
+                // projections, as they are not *constrained*
+                // (defined above)
+            }
+
+            hir::TyKind::Path(hir::QPath::Resolved(None, ref path)) => {
+                // consider only the lifetimes on the final
+                // segment; I am not sure it's even currently
+                // valid to have them elsewhere, but even if it
+                // is, those would be potentially inputs to
+                // projections
+                if let Some(last_segment) = path.segments.last() {
+                    match path.res {
+                        Res::Def(DefKind::TyAlias, def_id) => {
+                            let constrained = self.tcx.constrained_generics_of_ty_alias(def_id);
+                            if let Some(args) = last_segment.args {
+                                let args = args.args;
+                                constrained.into_iter().take_while(|i| *i < args.len()).for_each(|i| {
+                                    let param = &args[i];
+                                    match param {
+                                        hir::GenericArg::Lifetime(lt) => {
+                                            self.regions.insert(lt.name.normalize_to_macros_2_0());
+                                        }
+                                        _ => {}
+                                    }
+                                });
+                            }
+                        }
+                        Res::Def(DefKind::TyParam, def_id) => {
+                            self.types.insert(def_id);
+                        }
+                        _ => self.visit_path_segment(path.span, last_segment),
+                    }
+                }
+            }
+
+            _ => {
+                intravisit::walk_ty(self, ty);
+            }
+        }
+    }
+
+    fn visit_lifetime(&mut self, lifetime_ref: &'v hir::Lifetime) {
+        self.regions.insert(lifetime_ref.name.normalize_to_macros_2_0());
     }
 }
 

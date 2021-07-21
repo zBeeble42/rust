@@ -50,7 +50,7 @@ pub struct TraitDef {
 
 /// Whether this trait is treated specially by the standard library
 /// specialization lint.
-#[derive(HashStable, PartialEq, Clone, Copy, TyEncodable, TyDecodable)]
+#[derive(Debug, HashStable, PartialEq, Clone, Copy, TyEncodable, TyDecodable)]
 pub enum TraitSpecializationKind {
     /// The default. Specializing on this trait is not allowed.
     None,
